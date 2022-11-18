@@ -8,6 +8,126 @@ use std::slice;
 use std::mem::MaybeUninit;
 use alloc::vec::Vec;
 
+use ::value::Value;
+use value::Secrets;
+use vrl::diagnostic::DiagnosticList;
+use vrl::state::TypeState;
+use vrl::{diagnostic::Formatter, prelude::BTreeMap, CompileConfig, Runtime};
+use vrl::{TargetValue, Terminate, TimeZone};
+
+
+// maybe not needed but will be the the formatted output glue
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct Input {
+    pub program: String,
+    pub event: Value,
+}
+
+impl Input {
+    pub fn new(program: &str, event: Value) -> Self {
+        Self {
+            program: program.to_owned(),
+            event,
+        }
+    }
+}
+
+// The module returns the result of the last expression and the event that results from the
+// applied program
+#[derive(Deserialize, Serialize)]
+pub struct VrlCompileResult {
+    pub output: Value,
+    pub result: Value,
+}
+
+impl VrlCompileResult {
+    fn new(output: Value, result: Value) -> Self {
+        Self { output, result }
+    }
+}
+
+#[derive(Deserialize, Serialize, Default)]
+pub struct VrlDiagnosticResult {
+    pub list: Vec<String>,
+    pub msg: String,
+    pub msg_colorized: String,
+}
+
+impl VrlDiagnosticResult {
+    fn new(program: &str, diagnostic_list: DiagnosticList) -> Self {
+        Self {
+            list: diagnostic_list
+                .clone()
+                .into_iter()
+                .map(|diag| String::from(diag.message()))
+                .collect(),
+            msg: Formatter::new(program, diagnostic_list.clone()).to_string(),
+            msg_colorized: Formatter::new(program, diagnostic_list)
+                .colored()
+                .to_string(),
+        }
+    }
+
+    fn new_runtime_error(program: &str, terminate: Terminate) -> Self {
+        Self {
+            list: Vec::with_capacity(1),
+            msg: Formatter::new(program, terminate.clone().get_expression_error()).to_string(),
+            msg_colorized: Formatter::new(program, terminate.get_expression_error())
+                .colored()
+                .to_string(),
+        }
+    }
+}
+
+fn compile(mut input: Input) -> Result<VrlCompileResult, VrlDiagnosticResult> {
+    let event = &mut input.event;
+    let functions = stdlib::all();
+    let state = TypeState::default();
+    let mut runtime = Runtime::default();
+    let config = CompileConfig::default();
+    let timezone = TimeZone::default();
+
+    let mut target_value = TargetValue {
+        value: event.clone(),
+        metadata: Value::Object(BTreeMap::new()),
+        secrets: Secrets::new(),
+    };
+
+    let program = match vrl::compile_with_state(&input.program, &functions, &state, config) {
+        Ok(program) => program,
+        Err(diagnostics) => return Err(VrlDiagnosticResult::new(&input.program, diagnostics)),
+    };
+
+    match runtime.resolve(&mut target_value, &program.program, &timezone) {
+        Ok(result) => Ok(VrlCompileResult::new(result, target_value.value)),
+        Err(err) => Err(VrlDiagnosticResult::new_runtime_error(&input.program, err)),
+    }
+}
+
+#[cfg_attr(all(target_arch = "wasm32"), export_name = "run_vrl_wasm")]
+#[no_mangle]
+pub unsafe extern "C" fn run_vrl(ptr: u32, len: u32) -> u32 {
+    let incoming = &ptr_to_string(ptr, len);
+    
+    let input: Input = serde_json::from_str(incoming).unwrap();
+
+    match compile(input) {
+        Ok(res) => {
+            let res_json_str = serde_json::to_value(res).unwrap().to_string();
+
+            store_string_at_ptr(&res_json_str, ptr);
+            res_json_str.len() as u32
+        },
+        Err(err) => {
+            let err_json_str = serde_json::to_value(err).unwrap().to_string();
+            store_string_at_ptr(&err_json_str, ptr);
+            err_json_str.len() as u32
+        }
+    }
+}
+
 #[cfg_attr(all(target_arch = "wasm32"), export_name = "add_wasm")]
 #[no_mangle]
 pub fn add(left: usize, right: usize) -> usize {

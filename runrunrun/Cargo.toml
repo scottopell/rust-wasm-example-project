@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 wasmtime = { git= "https://github.com/bytecodealliance/wasmtime" }
+serde_json = "1.0.87"
+serde = { version = "1.0", features = ["derive"] }
