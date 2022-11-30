@@ -14,10 +14,13 @@ const BUF_SIZE: u32 = 2048;
 // const WASM_PAGE_SIZE: u32 = 65536;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("line 17");
     let engine = Engine::default();
+    println!("line 19");
     let module = Module::from_file(&engine, WASM_BYTES_PATH)?;
 
     // print out the imports here
+    println!("line 23");
     let imports = module.imports();
     println!("printing out all the required imports now:");
     imports.for_each(|import| println!("{0}", import.name()));
