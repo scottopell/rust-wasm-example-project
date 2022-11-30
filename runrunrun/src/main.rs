@@ -13,29 +13,6 @@ const WASM_BYTES_PATH: &str = "/Users/jon.padilla/Documents/scott-rust-wasmtime/
 const BUF_SIZE: u32 = 2048;
 // const WASM_PAGE_SIZE: u32 = 65536;
 
-
-// unsafe fn writeToWasmMemory(outgoing: String, bufPtr: u32, memory: Memory, store: &mut Store<()>, instance_ref: &mut Instance) -> Result<(), Box<dyn Error>> {
-//     if outgoing.len() as u32 > BUF_SIZE {
-//         println!("runrunrun/src/main.rs::writeToWasmMemory() : outgoing string length {0} bigger than buffer {1}", outgoing.len(), BUF_SIZE);
-//     }
-    
-//     // let memory = instance_ref.get_export(store, "memory").unwrap().into_memory().unwrap();
-
-//     let mut memory_buf = memory.data(store);
-    
-//     let input_size = outgoing.len() as u32;
-
-//     copy(outgoing.as_ptr(), memory_buf.as_ptr() as *mut u8, 1);
-
-//     Ok(())
-// }
-
-// // example function using the wasmtime api to allocate memory
-// unsafe fn allocateToWasmMemory(memory: Memory, store: &mut Store<()>) -> Result<(), Box<dyn Error>> {
-
-//     Ok(())
-// }
-
 fn main() -> Result<(), Box<dyn Error>> {
     let engine = Engine::default();
     let module = Module::from_file(&engine, WASM_BYTES_PATH)?;
@@ -46,27 +23,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     imports.for_each(|import| println!("{0}", import.name()));
 
 
-    // print out the exports here
+    // snippet to print out the exports here
     // let _exports = module.exports();
     // println!("printing out all the exports now: ");
     // exports.for_each(|export| println!("{0}", export.name()));
 
     // we cannot instantiate like normal since we are missing
     // the below imports
-    // printing out all the required imports now:
     // __wbindgen_describe
     // __wbindgen_externref_table_grow
     // __wbindgen_externref_table_set_null
     // __wbindgen_throw
 
-    // so we must use the linker and the function below it as well
-    // this potentially will cause errors in the future
-    // that we won't be able to figure out this was the culprit
+    // we can still make the wasm binary run by calling the
+    // define_unknown_imports_as_traps() function, but it 
+    // requires a linker object first which we create below
     let mut linker = Linker::new(&engine);
     linker.define_unknown_imports_as_traps(&module)?;
 
 
     let mut store = Store::new(&engine, ());
+
+    // because we had to use a linker, we instantiate from the linker
+    // object instead of Instance::new()
+
     //let instance = Instance::new(&mut store, &module, &[])?;
     let instance = linker.instantiate(&mut store, &module)?;
 
@@ -77,15 +57,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let _memory_buf = memory.data(&mut store);
 
-    // let _add = instance
-    //     .get_typed_func::<(i32, i32), i32>(&mut store, "add_wasm")
-    //     .expect("`add_wasm` was not an exported function");
-
-    // let allocate = instance.get_export(&mut store, "allocate").unwrap().into_func().unwrap();
     let allocate = instance
         .get_typed_func::<u32, u32>(&mut store, "allocate")
         .expect("`allocate` was not an exported function");
 
+    // we theoretically would call deallocate but this example is incomplete
     let _deallocate = instance
         .get_typed_func::<(u32, u32), ()>(&mut store, "deallocate")
         .expect("`deallocate` was not an exported function");
@@ -144,9 +120,5 @@ fn main() -> Result<(), Box<dyn Error>> {
         let utf8 = std::str::from_utf8_unchecked(temp_vec.as_slice());
         println!("wasm output string: {0}", utf8);
     }
-
-
-    // let result = add.call(&mut store, (3, 8))?;
-    // println!("Answer: {:?}", result);
     Ok(())
 }
